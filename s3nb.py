@@ -1,5 +1,6 @@
 import boto3
 import configparser
+import datetime
 
 
 class S3Shell:
@@ -20,9 +21,9 @@ class S3Shell:
 
     def cd(self, path):
         if path == '..':
-            self.prefix = '/'.join(self.prefix.split('/')[:-1])[1:]
+            self.prefix = '/'.join(self.prefix.split('/')[:-2]) + '/'
         else:
-            self.prefix = '/'.join([self.prefix, path])[1:]
+            self.prefix += (path + '/') if not path.endswith('/') else path
 
         return self.prefix
 
@@ -31,14 +32,25 @@ class S3Shell:
         self.bucket = bucket
         return old_bucket
 
-    def ls(self, path='', max_keys=1000, start_after=''):
+    def _parse_path(self, path):
         if path.startswith('/'):
             bucket = path.split('/')[1]
             prefix = '/'.join(path.split('/')[2:]) 
         else:
             bucket = self.bucket
-            prefix = self.prefix
+            prefix = self.prefix + path
 
+        return bucket, prefix
+
+    def lsb(self):
+        response = self.s3client.list_buckets()
+        if 'Buckets' in response:
+            return [{'name': bucket['Name'], 'creation_date': bucket.get('CreationDate', datetime.datetime.now()).strftime('%Y-%m-%d %H:%M:%S'), 'region': bucket.get('BucketRegion', '')} for bucket in response['Buckets']]
+
+        return []
+
+    def ls(self, path='', max_keys=1000, start_after=''):
+        bucket, prefix = self._parse_path(path)
         response = self.s3client.list_objects_v2(
             Bucket=bucket, 
             Prefix=prefix, 
@@ -51,7 +63,7 @@ class S3Shell:
         if 'Contents' in response:
             for obj in response['Contents']:
                 items.append({
-                    'key': obj['Key'],
+                    'key': f"/{bucket}/" + obj['Key'],
                     'size': obj['Size'],
                     'last_modified':obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
                     'storage_class':obj['StorageClass']
@@ -60,10 +72,14 @@ class S3Shell:
         if 'CommonPrefixes' in response:
             for prefix in response['CommonPrefixes']:
                 items.append({
-                    'key': prefix['Prefix'],
+                    'key': f"/{bucket}/" + prefix['Prefix'],
                     'size': 0,
                     'last_modified': '',
                     'storage_class': ''
                 })
 
         return items
+
+    def dl(self, path, local_path):
+        bucket, prefix = self._parse_path(path)
+        return self.s3client.download_file(bucket, prefix, local_path)
