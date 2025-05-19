@@ -1,6 +1,7 @@
 import boto3
 import configparser
 import datetime
+import polars as pl
 
 
 class S3Shell:
@@ -49,34 +50,41 @@ class S3Shell:
 
         return []
 
-    def ls(self, path='', max_keys=1000, start_after=''):
+    def ls(self, path='', max_keys=1000, start_after='', depth=1):
         bucket, prefix = self._parse_path(path)
+        items = self._ls_recursive(bucket, prefix, max_keys, start_after, depth)
+        if items:
+            return pl.DataFrame(items)
+        else:
+            return pl.DataFrame()
+
+    def _ls_recursive(self, bucket, prefix, max_keys, start_after, depth):
         response = self.s3client.list_objects_v2(
             Bucket=bucket, 
             Prefix=prefix, 
             Delimiter='/',
             MaxKeys=max_keys,
             StartAfter=start_after
-            )
+        )
 
         items = []
         if 'Contents' in response:
             for obj in response['Contents']:
                 items.append({
-                    'key': f"/{bucket}/" + obj['Key'],
+                    'key': obj['Key'],
                     'size': obj['Size'],
-                    'last_modified':obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
-                    'storage_class':obj['StorageClass']
+                    'last_modified': obj['LastModified'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'storage_class': obj['StorageClass'],
+                    'bucket': bucket,
                 })
 
         if 'CommonPrefixes' in response:
-            for prefix in response['CommonPrefixes']:
-                items.append({
-                    'key': f"/{bucket}/" + prefix['Prefix'],
-                    'size': 0,
-                    'last_modified': '',
-                    'storage_class': ''
-                })
+            if depth > 0:
+                for cp in response['CommonPrefixes']:
+                    sub_prefix = cp['Prefix']
+                    items.extend(self._ls_recursive(bucket, sub_prefix, max_keys, '', depth - 1))
+            else:
+                items.extend([{'key': cp['Prefix'], 'size': 0, 'last_modified': '', 'storage_class': '', 'bucket': bucket} for cp in response['CommonPrefixes']])
 
         return items
 
