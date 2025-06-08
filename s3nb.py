@@ -50,7 +50,7 @@ class S3Shell:
 
         return []
 
-    def ls(self, path='', max_keys=1000, start_after='', depth=1):
+    def ls(self, path='', max_keys=1000, start_after='', depth=0):
         bucket, prefix = self._parse_path(path)
         items = self._ls_recursive(bucket, prefix, max_keys, start_after, depth)
         if items:
@@ -82,7 +82,10 @@ class S3Shell:
             if depth > 0:
                 for cp in response['CommonPrefixes']:
                     sub_prefix = cp['Prefix']
-                    items.extend(self._ls_recursive(bucket, sub_prefix, max_keys, '', depth - 1))
+                    children = self._ls_recursive(bucket, sub_prefix, max_keys, '', depth - 1)
+                    dir = {'key': cp['Prefix'], 'size': sum(child['size'] for child in children), 'last_modified': '', 'storage_class': '', 'bucket': bucket} 
+                    items.extend([dir])
+                    items.extend(children)
             else:
                 items.extend([{'key': cp['Prefix'], 'size': 0, 'last_modified': '', 'storage_class': '', 'bucket': bucket} for cp in response['CommonPrefixes']])
 
